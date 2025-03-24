@@ -1,84 +1,55 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils import executor
-from docxtpl import DocxTemplate
-from datetime import datetime
-import os
 
-# Вставь свой токен сюда
-TOKEN = "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
+import logging
+logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=TOKEN, parse_mode="HTML")
-dp = Dispatcher(bot)
+bot = Bot(token="7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ")
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
-# Кнопка запуска
+# Шаги FSM
+class Form(StatesGroup):
+    doctor_name = State()
+    patient_name = State()
+
+# Кнопка
 start_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-start_keyboard.add(KeyboardButton("📝 Подать извещение"))
+start_keyboard.add(KeyboardButton("✍ Подать извещение"))
 
-# Хранилище состояний
-user_data = {}
-
-@dp.message_handler(commands=["start"])
-async def cmd_start(message: types.Message):
-    await message.answer("Здравствуйте! Я помогу сформировать экстренное извещение.\n\nНажмите кнопку ниже, чтобы начать:", reply_markup=start_keyboard)
-
-@dp.message_handler(lambda message: message.text == "📝 Подать извещение")
-async def start_report(message: types.Message):
-    user_data[message.from_user.id] = {}
+# Старт
+@dp.message_handler(commands=['start'], state='*')
+@dp.message_handler(lambda message: message.text == "✍ Подать извещение", state='*')
+async def start_form(message: types.Message, state: FSMContext):
+    await Form.doctor_name.set()
     await message.answer("Введите ФИО врача:")
-    user_data[message.from_user.id]["step"] = "fio"
 
+# Ввод врача
+@dp.message_handler(state=Form.doctor_name)
+async def get_doctor_name(message: types.Message, state: FSMContext):
+    await state.update_data(doctor_name=message.text)
+    await Form.patient_name.set()
+    await message.answer("Введите ФИО пациента:")
+
+# Ввод пациента
+@dp.message_handler(state=Form.patient_name)
+async def get_patient_name(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    doctor = data['doctor_name']
+    patient = message.text
+
+    # Здесь будет генерация файла (пока просто подтверждение)
+    await message.answer(f"ФИО врача: {doctor}\nФИО пациента: {patient}\n\nИзвещение готово. Спасибо!")
+    await state.finish()
+
+# Если пользователь пишет что-то вне шагов
 @dp.message_handler()
-async def handle_all_messages(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_data:
-        await message.answer("Нажмите кнопку '📝 Подать извещение', чтобы начать.")
-        return
+async def fallback(message: types.Message):
+    await message.answer("Нажмите кнопку '✍ Подать извещение', чтобы начать.", reply_markup=start_keyboard)
 
-    step = user_data[user_id].get("step")
-
-    if step == "fio":
-        user_data[user_id]["doctor"] = message.text
-        await message.answer("Введите ФИО пациента:")
-        user_data[user_id]["step"] = "patient"
-
-    elif step == "patient":
-        user_data[user_id]["patient"] = message.text
-        await message.answer("Введите диагноз:")
-        user_data[user_id]["step"] = "diagnosis"
-
-    elif step == "diagnosis":
-        user_data[user_id]["diagnosis"] = message.text
-        await message.answer("Введите лабораторные результаты:")
-        user_data[user_id]["step"] = "lab"
-
-    elif step == "lab":
-        user_data[user_id]["lab"] = message.text
-
-        # Формируем извещение
-        doc = DocxTemplate("template.docx")
-
-        context = {
-            "doctor": user_data[user_id]["doctor"],
-            "hospital": "ГБУЗ МО ДКЦ им. Л.М. Рошаля",
-            "patient": user_data[user_id]["patient"],
-            "diagnosis": user_data[user_id]["diagnosis"],
-            "lab": user_data[user_id]["lab"],
-            "date": datetime.today().strftime("%d.%m.%Y"),
-        }
-
-        output_file = f"notification_{user_id}.docx"
-        doc.render(context)
-        doc.save(output_file)
-
-        with open(output_file, "rb") as f:
-            await message.answer_document(f, caption="📄 Готовый документ")
-        
-        os.remove(output_file)
-        user_data.pop(user_id, None)
-
-        await message.answer("Извещение сформировано. Чтобы создать новое — нажмите кнопку ниже.", reply_markup=start_keyboard)
-
-if __name__ == "__main__":
-    from aiogram import executor
-    executor.start_polling(dp)
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
