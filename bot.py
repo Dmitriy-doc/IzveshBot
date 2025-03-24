@@ -1,85 +1,186 @@
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils import executor
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
-
-from docx import Document
-from datetime import datetime
+import asyncio
+import logging
 import os
+from datetime import datetime
+from aiogram import Bot, Dispatcher, types
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
+from aiogram.client.bot import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from docxtpl import DocxTemplate
 
-# Токен берем из переменной окружения (например, на Render)
-API_TOKEN = "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
+# Замените на ваш токен бота
+TOKEN = "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
+# Подпись для извещения
+FROM_HOSPITAL = "ГБУЗ МО ДКЦ и.м Л.М Рошаля"
 
-bot = Bot(token=API_TOKEN, parse_mode="HTML")
+logging.basicConfig(level=logging.INFO)
+
+# Инициализация бота и диспетчера с поддержкой FSM
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp = Dispatcher(storage=storage)
 
-class Form(StatesGroup):
-    doctor_name = State()
-    patient_name = State()
-    diagnosis   = State()
-    lab_results = State()
+# Определяем состояния для последовательного ввода данных
+class NotificationStates(StatesGroup):
+    diag = State()              # Основной диагноз
+    fio = State()               # ФИО пациента
+    sex = State()               # Пол
+    birth = State()             # Дата рождения
+    address = State()           # Адрес проживания
+    phone = State()             # Телефон
+    work_place = State()        # Место работы/учебы
+    disease_date = State()      # Дата заболевания
+    last_visit_date = State()   # Дата последнего посещения/госпитализации
+    lab_results = State()       # Лабораторные результаты
+    hospital_place = State()    # Место госпитализации
+    additional_info = State()   # Дополнительные сведения
+    reporter = State()          # ФИО врача (сообщившего извещение)
 
-start_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-start_keyboard.add(KeyboardButton("📝 Подать извещение"))
+# Команда /start выводит кнопку «Подать извещение»
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message, state: FSMContext):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Подать извещение", callback_data="new_notification")]
+    ])
+    await message.answer(
+        "Добро пожаловать!\nНажмите кнопку «Подать извещение», чтобы начать создание извещения.",
+        reply_markup=keyboard
+    )
 
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    await message.answer("Нажмите кнопку '📝 Подать извещение', чтобы начать.", reply_markup=start_keyboard)
+# Обработчик нажатия кнопки "Подать извещение"
+@dp.callback_query(lambda c: c.data == "new_notification")
+async def new_notification(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите основной диагноз (например, 'J18.9 - Пневмония'):")
+    await state.set_state(NotificationStates.diag)
+    await callback.answer()
 
-@dp.message_handler(lambda msg: msg.text == "📝 Подать извещение", state='*')
-async def start_form(message: types.Message):
-    await Form.doctor_name.set()
-    await message.answer("Введите ФИО врача:")
-
-@dp.message_handler(state=Form.doctor_name)
-async def process_doctor_name(message: types.Message, state: FSMContext):
-    await state.update_data(doctor_name=message.text)
-    await Form.patient_name.set()
+@dp.message(NotificationStates.diag)
+async def process_diag(message: types.Message, state: FSMContext):
+    await state.update_data(diag=message.text)
     await message.answer("Введите ФИО пациента:")
+    await state.set_state(NotificationStates.fio)
 
-@dp.message_handler(state=Form.patient_name)
-async def process_patient_name(message: types.Message, state: FSMContext):
-    await state.update_data(patient_name=message.text)
-    await Form.diagnosis.set()
-    await message.answer("Введите диагноз:")
+@dp.message(NotificationStates.fio)
+async def process_fio(message: types.Message, state: FSMContext):
+    await state.update_data(fio=message.text)
+    await message.answer("Введите пол (М/Ж):")
+    await state.set_state(NotificationStates.sex)
 
-@dp.message_handler(state=Form.diagnosis)
-async def process_diagnosis(message: types.Message, state: FSMContext):
-    await state.update_data(diagnosis=message.text)
-    await Form.lab_results.set()
-    await message.answer("Введите лабораторные результаты:")
+@dp.message(NotificationStates.sex)
+async def process_sex(message: types.Message, state: FSMContext):
+    await state.update_data(sex=message.text)
+    await message.answer("Введите дату рождения (например, 11.08.1982):")
+    await state.set_state(NotificationStates.birth)
 
-@dp.message_handler(state=Form.lab_results)
-async def process_lab(message: types.Message, state: FSMContext):
+@dp.message(NotificationStates.birth)
+async def process_birth(message: types.Message, state: FSMContext):
+    await state.update_data(birth=message.text)
+    await message.answer("Введите адрес проживания:")
+    await state.set_state(NotificationStates.address)
+
+@dp.message(NotificationStates.address)
+async def process_address(message: types.Message, state: FSMContext):
+    await state.update_data(address=message.text)
+    await message.answer("Введите телефон:")
+    await state.set_state(NotificationStates.phone)
+
+@dp.message(NotificationStates.phone)
+async def process_phone(message: types.Message, state: FSMContext):
+    await state.update_data(phone=message.text)
+    await message.answer("Введите наименование и адрес места работы/учебы:")
+    await state.set_state(NotificationStates.work_place)
+
+@dp.message(NotificationStates.work_place)
+async def process_work_place(message: types.Message, state: FSMContext):
+    await state.update_data(work_place=message.text)
+    await message.answer("Введите дату заболевания (например, 12.03.2025):")
+    await state.set_state(NotificationStates.disease_date)
+
+@dp.message(NotificationStates.disease_date)
+async def process_disease_date(message: types.Message, state: FSMContext):
+    await state.update_data(disease_date=message.text)
+    await message.answer("Введите дату последнего посещения/госпитализации (например, 12.03.2025):")
+    await state.set_state(NotificationStates.last_visit_date)
+
+@dp.message(NotificationStates.last_visit_date)
+async def process_last_visit_date(message: types.Message, state: FSMContext):
+    await state.update_data(last_visit_date=message.text)
+    await message.answer("Введите лабораторные результаты (метод, дата отбора, результат):")
+    await state.set_state(NotificationStates.lab_results)
+
+@dp.message(NotificationStates.lab_results)
+async def process_lab_results(message: types.Message, state: FSMContext):
     await state.update_data(lab_results=message.text)
+    await message.answer("Введите место госпитализации:")
+    await state.set_state(NotificationStates.hospital_place)
+
+@dp.message(NotificationStates.hospital_place)
+async def process_hospital_place(message: types.Message, state: FSMContext):
+    await state.update_data(hospital_place=message.text)
+    await message.answer("Введите дополнительные сведения (мероприятия и др.):")
+    await state.set_state(NotificationStates.additional_info)
+
+@dp.message(NotificationStates.additional_info)
+async def process_additional_info(message: types.Message, state: FSMContext):
+    await state.update_data(additional_info=message.text)
+    await message.answer("Введите ФИО врача (сообщившего извещение):")
+    await state.set_state(NotificationStates.reporter)
+
+@dp.message(NotificationStates.reporter)
+async def process_reporter(message: types.Message, state: FSMContext):
+    await state.update_data(reporter=message.text)
+    
     data = await state.get_data()
-
-    # Генерация документа
-    doc = Document()
-    doc.add_heading("Экстренное извещение", level=1)
-    doc.add_paragraph(f"Врач: {data['doctor_name']}")
-    doc.add_paragraph(f"Пациент: {data['patient_name']}")
-    doc.add_paragraph(f"Диагноз: {data['diagnosis']}")
-    doc.add_paragraph(f"Лабораторные данные: {data['lab_results']}")
+    current_date = datetime.today().strftime("%d.%m.%Y")
     
-    filename = f"izvesh_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-    doc.save(filename)
+    # Абсолютный путь к шаблону
+    template_path = "/Users/dmitriy/Documents/IzveshBot/template.docx"
+    output_path = "extr_notification.docx"
     
-    with open(filename, "rb") as file:
-        await message.answer_document(file, caption="Вот ваше извещение 📄")
+    try:
+        doc = DocxTemplate(template_path)
+    except Exception as e:
+        await message.answer(f"Ошибка при загрузке шаблона: {e}")
+        return
+    
+    context = {
+        "diag": data.get("diag"),
+        "fio": data.get("fio"),
+        "sex": data.get("sex"),
+        "birth": data.get("birth"),
+        "address": data.get("address"),
+        "phone": data.get("phone"),
+        "work_place": data.get("work_place"),
+        "disease_date": data.get("disease_date"),
+        "first_contact_date": current_date,
+        "diagnosis_date": current_date,
+        "last_visit_date": data.get("last_visit_date"),
+        "lab_results": data.get("lab_results"),
+        "hospital_place": data.get("hospital_place"),
+        "additional_info": data.get("additional_info"),
+        "reporter": data.get("reporter"),
+        "sender": data.get("reporter"),  # Отправивший извещение совпадает с ФИО врача
+        "registration_number": "",       # Оставляем поле пустым
+        "from_hospital": FROM_HOSPITAL
+    }
+    
+    doc.render(context)
+    doc.save(output_path)
+    
+    doc_file = FSInputFile(output_path)
+    await message.answer_document(doc_file)
+    
+    os.remove(output_path)
+    await message.answer("Извещение сформировано и отправлено!")
+    await state.clear()
 
-    os.remove(filename)
-
-    await message.answer("Извещение сформировано. Чтобы отправить новое — нажмите \"📝 Подать извещение\".", 
-                         reply_markup=start_keyboard)
-    await state.finish()
-
-@dp.message_handler()
-async def fallback(message: types.Message):
-    await message.answer("Чтобы подать извещение, нажмите \"📝 Подать извещение\".")
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
