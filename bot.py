@@ -10,7 +10,7 @@ from datetime import datetime
 import os
 
 # Токен берем из переменной окружения (например, на Render)
-API_TOKEN = os.getenv("7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ")
+API_TOKEN = os.getenv "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 storage = MemoryStorage()
