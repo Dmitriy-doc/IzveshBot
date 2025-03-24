@@ -1,55 +1,79 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils import executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.utils import executor
+from aiogram.dispatcher.filters import Text
+from docx import Document
+from datetime import datetime
+import os
 
-import logging
-logging.basicConfig(level=logging.INFO)
+API_TOKEN = os.getenv("7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ")
 
-bot = Bot(token="7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ")
+bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# Шаги FSM
+# Шаги для FSM
 class Form(StatesGroup):
     doctor_name = State()
     patient_name = State()
+    diagnosis = State()
+    lab_results = State()
 
-# Кнопка
+# Кнопка запуска
 start_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-start_keyboard.add(KeyboardButton("✍ Подать извещение"))
+start_keyboard.add(KeyboardButton("\ud83d\udcdc Подать извещение"))
 
-# Старт
-@dp.message_handler(commands=['start'], state='*')
-@dp.message_handler(lambda message: message.text == "✍ Подать извещение", state='*')
-async def start_form(message: types.Message, state: FSMContext):
+@dp.message_handler(commands=["start"])
+async def start_handler(message: types.Message):
+    await message.answer("Нажмите кнопку '📝 Подать извещение', чтобы начать.", reply_markup=start_keyboard)
+
+@dp.message_handler(lambda message: message.text == "\ud83d\udcdc Подать извещение")
+async def start_form(message: types.Message):
     await Form.doctor_name.set()
     await message.answer("Введите ФИО врача:")
 
-# Ввод врача
 @dp.message_handler(state=Form.doctor_name)
-async def get_doctor_name(message: types.Message, state: FSMContext):
+async def process_doctor(message: types.Message, state: FSMContext):
     await state.update_data(doctor_name=message.text)
-    await Form.patient_name.set()
+    await Form.next()
     await message.answer("Введите ФИО пациента:")
 
-# Ввод пациента
 @dp.message_handler(state=Form.patient_name)
-async def get_patient_name(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    doctor = data['doctor_name']
-    patient = message.text
+async def process_patient(message: types.Message, state: FSMContext):
+    await state.update_data(patient_name=message.text)
+    await Form.next()
+    await message.answer("Введите диагноз:")
 
-    # Здесь будет генерация файла (пока просто подтверждение)
-    await message.answer(f"ФИО врача: {doctor}\nФИО пациента: {patient}\n\nИзвещение готово. Спасибо!")
+@dp.message_handler(state=Form.diagnosis)
+async def process_diagnosis(message: types.Message, state: FSMContext):
+    await state.update_data(diagnosis=message.text)
+    await Form.next()
+    await message.answer("Введите лабораторные результаты:")
+
+@dp.message_handler(state=Form.lab_results)
+async def process_lab(message: types.Message, state: FSMContext):
+    await state.update_data(lab_results=message.text)
+    data = await state.get_data()
+
+    # Создание документа
+    doc = Document()
+    doc.add_heading("Экстренное извещение", level=1)
+    doc.add_paragraph(f"ФИО врача: {data['doctor_name']}")
+    doc.add_paragraph(f"ФИО пациента: {data['patient_name']}")
+    doc.add_paragraph(f"Диагноз: {data['diagnosis']}")
+    doc.add_paragraph(f"Лабораторные данные: {data['lab_results']}")
+    filename = f"izvesh_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+    doc.save(filename)
+
+    with open(filename, "rb") as file:
+        await bot.send_document(chat_id=message.chat.id, document=file)
+
+    os.remove(filename)
+    await message.answer("Файл сформирован. Если нужно отправить ещё одно извещение — нажмите '📝 Подать извещение'.", reply_markup=start_keyboard)
     await state.finish()
 
-# Если пользователь пишет что-то вне шагов
-@dp.message_handler()
-async def fallback(message: types.Message):
-    await message.answer("Нажмите кнопку '✍ Подать извещение', чтобы начать.", reply_markup=start_keyboard)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
