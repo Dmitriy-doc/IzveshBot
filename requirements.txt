@@ -1,3 +1,2 @@
-aiogram==2.25.2
-python-docx
+aiogram==3.0.0b7
 docxtpl
