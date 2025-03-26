@@ -7,7 +7,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
-from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from docxtpl import DocxTemplate
@@ -19,7 +18,8 @@ FROM_HOSPITAL = "ГБУЗ МО ДКЦ и.м Л.М Рошаля"
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# Создаем объект бота без использования DefaultBotProperties
+bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
