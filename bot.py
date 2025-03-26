@@ -12,8 +12,9 @@ from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from docxtpl import DocxTemplate
 
-# Замените на ваш токен бота
-TOKEN = "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
+# Токен бота берётся из переменной окружения.
+# Убедитесь, что переменная BOT_TOKEN настроена на вашей платформе Render.
+TOKEN = os.environ.get("BOT_TOKEN", "your_default_token_here")
 FROM_HOSPITAL = "ГБУЗ МО ДКЦ и.м Л.М Рошаля"
 
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +23,7 @@ bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
+# Определяем состояния для последовательного ввода данных
 class NotificationStates(StatesGroup):
     diag = State()
     fio = State()
@@ -125,12 +127,12 @@ async def process_additional_info(message: types.Message, state: FSMContext):
     await message.answer("Введите ФИО врача (сообщившего извещение):")
     await state.set_state(NotificationStates.reporter)
 
+# Функция для генерации документа с использованием блокирующей операции в отдельном потоке
 async def generate_notification_doc(template_path: str, output_path: str, context: dict):
     def blocking_docx():
         doc = DocxTemplate(template_path)
         doc.render(context)
         doc.save(output_path)
-    # Выполняем блокирующую функцию в отдельном потоке
     await asyncio.to_thread(blocking_docx)
 
 @dp.message(NotificationStates.reporter)
@@ -139,7 +141,8 @@ async def process_reporter(message: types.Message, state: FSMContext):
     data = await state.get_data()
     current_date = datetime.today().strftime("%d.%m.%Y")
     
-    template_path = "/Users/dmitriy/Documents/IzveshBot/template.docx"
+    # Используйте относительный путь к шаблону.
+    template_path = "./template.docx"
     output_path = "extr_notification.docx"
     
     context = {
@@ -158,7 +161,7 @@ async def process_reporter(message: types.Message, state: FSMContext):
         "hospital_place": data.get("hospital_place"),
         "additional_info": data.get("additional_info"),
         "reporter": data.get("reporter"),
-        "sender": data.get("reporter"),  # Отправивший извещение совпадает с ФИО врача
+        "sender": data.get("reporter"),
         "registration_number": "",
         "from_hospital": FROM_HOSPITAL
     }
