@@ -3,7 +3,7 @@ import logging
 import os
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.fsm.storage.memory import MemoryStorage  # Доступно в aiogram 3.x
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
@@ -12,8 +12,9 @@ from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from docxtpl import DocxTemplate
 
-# Токен берётся из переменной окружения
-TOKEN = os.environ.get("BOT_TOKEN", "your_default_token_here")
+# Задайте здесь токен вашего бота.
+TOKEN = "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
+# Подпись для извещения
 FROM_HOSPITAL = "ГБУЗ МО ДКЦ и.м Л.М Рошаля"
 
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +23,7 @@ bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
+# Определяем состояния для последовательного ввода данных
 class NotificationStates(StatesGroup):
     diag = State()
     fio = State()
@@ -125,6 +127,7 @@ async def process_additional_info(message: types.Message, state: FSMContext):
     await message.answer("Введите ФИО врача (сообщившего извещение):")
     await state.set_state(NotificationStates.reporter)
 
+# Функция для генерации документа, выполняющая блокирующую операцию в отдельном потоке
 async def generate_notification_doc(template_path: str, output_path: str, context: dict):
     def blocking_docx():
         doc = DocxTemplate(template_path)
@@ -138,7 +141,7 @@ async def process_reporter(message: types.Message, state: FSMContext):
     data = await state.get_data()
     current_date = datetime.today().strftime("%d.%m.%Y")
     
-    # Используйте относительный путь к шаблону: файл template.docx должен быть в корневой директории репозитория
+    # Файл template.docx должен находиться в той же директории, что и этот скрипт
     template_path = "./template.docx"
     output_path = "extr_notification.docx"
     
