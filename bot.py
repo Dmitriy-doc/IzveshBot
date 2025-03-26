@@ -14,33 +14,29 @@ from docxtpl import DocxTemplate
 
 # Замените на ваш токен бота
 TOKEN = "7518865505:AAEdCzkLa10pGA6N4uRyuy2CTDAQP0w-IOQ"
-# Подпись для извещения
 FROM_HOSPITAL = "ГБУЗ МО ДКЦ и.м Л.М Рошаля"
 
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота и диспетчера с поддержкой FSM
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# Определяем состояния для последовательного ввода данных
 class NotificationStates(StatesGroup):
-    diag = State()              # Основной диагноз
-    fio = State()               # ФИО пациента
-    sex = State()               # Пол
-    birth = State()             # Дата рождения
-    address = State()           # Адрес проживания
-    phone = State()             # Телефон
-    work_place = State()        # Место работы/учебы
-    disease_date = State()      # Дата заболевания
-    last_visit_date = State()   # Дата последнего посещения/госпитализации
-    lab_results = State()       # Лабораторные результаты
-    hospital_place = State()    # Место госпитализации
-    additional_info = State()   # Дополнительные сведения
-    reporter = State()          # ФИО врача (сообщившего извещение)
+    diag = State()
+    fio = State()
+    sex = State()
+    birth = State()
+    address = State()
+    phone = State()
+    work_place = State()
+    disease_date = State()
+    last_visit_date = State()
+    lab_results = State()
+    hospital_place = State()
+    additional_info = State()
+    reporter = State()
 
-# Команда /start выводит кнопку «Подать извещение»
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -51,7 +47,6 @@ async def start_cmd(message: types.Message, state: FSMContext):
         reply_markup=keyboard
     )
 
-# Обработчик нажатия кнопки "Подать извещение"
 @dp.callback_query(lambda c: c.data == "new_notification")
 async def new_notification(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите основной диагноз (например, 'J18.9 - Пневмония'):")
@@ -130,22 +125,22 @@ async def process_additional_info(message: types.Message, state: FSMContext):
     await message.answer("Введите ФИО врача (сообщившего извещение):")
     await state.set_state(NotificationStates.reporter)
 
+async def generate_notification_doc(template_path: str, output_path: str, context: dict):
+    def blocking_docx():
+        doc = DocxTemplate(template_path)
+        doc.render(context)
+        doc.save(output_path)
+    # Выполняем блокирующую функцию в отдельном потоке
+    await asyncio.to_thread(blocking_docx)
+
 @dp.message(NotificationStates.reporter)
 async def process_reporter(message: types.Message, state: FSMContext):
     await state.update_data(reporter=message.text)
-    
     data = await state.get_data()
     current_date = datetime.today().strftime("%d.%m.%Y")
     
-    # Абсолютный путь к шаблону
     template_path = "/Users/dmitriy/Documents/IzveshBot/template.docx"
     output_path = "extr_notification.docx"
-    
-    try:
-        doc = DocxTemplate(template_path)
-    except Exception as e:
-        await message.answer(f"Ошибка при загрузке шаблона: {e}")
-        return
     
     context = {
         "diag": data.get("diag"),
@@ -164,17 +159,30 @@ async def process_reporter(message: types.Message, state: FSMContext):
         "additional_info": data.get("additional_info"),
         "reporter": data.get("reporter"),
         "sender": data.get("reporter"),  # Отправивший извещение совпадает с ФИО врача
-        "registration_number": "",       # Оставляем поле пустым
+        "registration_number": "",
         "from_hospital": FROM_HOSPITAL
     }
     
-    doc.render(context)
-    doc.save(output_path)
+    try:
+        await generate_notification_doc(template_path, output_path, context)
+    except Exception as e:
+        await message.answer(f"Ошибка при создании извещения: {e}")
+        logging.exception("Ошибка при генерации документа")
+        return
     
-    doc_file = FSInputFile(output_path)
-    await message.answer_document(doc_file)
+    try:
+        doc_file = FSInputFile(output_path)
+        await message.answer_document(doc_file)
+    except Exception as e:
+        await message.answer(f"Ошибка при отправке документа: {e}")
+        logging.exception("Ошибка при отправке документа")
+    finally:
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception as e:
+                logging.error(f"Не удалось удалить файл {output_path}: {e}")
     
-    os.remove(output_path)
     await message.answer("Извещение сформировано и отправлено!")
     await state.clear()
 
