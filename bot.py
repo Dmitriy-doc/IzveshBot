@@ -175,7 +175,20 @@ async def cancel_process(message: Message, state: FSMContext):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    await dp.start_polling(bot)
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if not webhook_url:
+        raise RuntimeError("Не указан WEBHOOK_URL в .env")
+
+    await bot.set_webhook(webhook_url)
+    await dp.start_webhook(
+        bot=bot,
+        webhook_path="",
+        on_startup=None,
+        on_shutdown=None,
+        skip_updates=True,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 5000))
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
