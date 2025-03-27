@@ -1,6 +1,6 @@
 import os
-import asyncio
 import logging
+import asyncio
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -11,30 +11,31 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.web import App, run_app
 from docxtpl import DocxTemplate
+from aiohttp import web
 
 load_dotenv()
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+PORT = int(os.getenv("PORT", 5000))
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN не указан")
+if not WEBHOOK_URL:
+    raise RuntimeError("WEBHOOK_URL не указан")
+
+# Логирование
+logging.basicConfig(level=logging.INFO)
 logfile_handler = logging.FileHandler("notifications_log.txt", encoding="utf-8")
-logfile_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(message)s')
-logfile_handler.setFormatter(formatter)
+logfile_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
 logging.getLogger().addHandler(logfile_handler)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise RuntimeError("Не указан токен бота. Установите переменную окружения BOT_TOKEN.")
-
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-if not WEBHOOK_URL:
-    raise RuntimeError("Не указан WEBHOOK_URL в .env")
-
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
+# FSM
 class Form(StatesGroup):
     fio = State()
     sex = State()
@@ -178,13 +179,19 @@ async def cancel_process(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Заполнение формы отменено. Начните сначала командой /start.", reply_markup=ReplyKeyboardRemove())
 
-# ---- Запуск через webhook (Render) ----
+# Webhook handler
+async def handle_webhook(request):
+    update = await request.json()
+    await dp.feed_webhook_update(bot, update)
+    return web.Response()
 
 async def main():
     logging.info("Starting bot...")
-
     await bot.set_webhook(WEBHOOK_URL)
-    return App(dispatcher=dp, bot=bot)
+
+    app = web.Application()
+    app.router.add_post("/", handle_webhook)
+    return app
 
 if __name__ == "__main__":
-    run_app(main(), host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    web.run_app(main(), host="0.0.0.0", port=PORT)
