@@ -32,7 +32,8 @@ class PatientReport(StatesGroup):
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable not set. Please set BOT_TOKEN before running the bot.")
-bot = Bot(token=BOT_TOKEN)
+from aiogram.client.default import DefaultBotProperties
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=MemoryStorage())
 
 # Start command handler to initiate the data collection conversation
