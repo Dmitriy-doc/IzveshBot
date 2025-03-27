@@ -1,11 +1,11 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
 import asyncio
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+from aiohttp import web
+
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, FSInputFile
 from aiogram.filters import Command, CommandStart
@@ -14,25 +14,29 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 
-# Логирование в консоль + файл
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logfile_handler = logging.FileHandler("notifications_log.txt", encoding="utf-8")
-logfile_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(message)s')
-logfile_handler.setFormatter(formatter)
-logging.getLogger().addHandler(logfile_handler)
-
+# Загрузка переменных окружения
+load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+PORT = int(os.getenv("PORT", 5000))
 
 if not BOT_TOKEN:
-    raise RuntimeError("Не указан токен бота. Установите переменную окружения BOT_TOKEN.")
+    raise RuntimeError("❌ BOT_TOKEN не указан")
 if not WEBHOOK_URL:
-    raise RuntimeError("Не указан WEBHOOK_URL в .env или переменных окружения.")
+    raise RuntimeError("❌ WEBHOOK_URL не указан")
 
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# Настройка логов
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+file_handler = logging.FileHandler("notifications_log.txt", encoding="utf-8")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+logging.getLogger().addHandler(file_handler)
+
+# Инициализация бота
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
+# FSM Состояния
 class Form(StatesGroup):
     fio = State()
     sex = State()
@@ -160,9 +164,13 @@ async def process_sender(message: Message, state: FSMContext):
         doc.render(data)
         output_file = f"notification_{message.from_user.id}.docx"
         doc.save(output_file)
+
         file = FSInputFile(output_file, filename="izveshchenie_058u.docx")
         await message.answer_document(file, caption="✅ Экстренное извещение сформировано.")
-        logging.info(f"{datetime.now()} - @{message.from_user.username or 'NoUsername'} - {data['fio']} - {data['diagnosis']}")
+
+        log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - @{message.from_user.username or 'NoUsername'} - {data['fio']} - {data['diagnosis']}"
+        logging.info(log_entry)
+
     except Exception as e:
         logging.exception("Ошибка при формировании документа")
         await message.answer("Извините, не удалось сформировать документ.")
@@ -172,16 +180,17 @@ async def cancel_process(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Заполнение формы отменено. Начните сначала командой /start.", reply_markup=ReplyKeyboardRemove())
 
+# WEBHOOK запуск aiohttp-приложения
 async def main():
     logging.info("Starting bot...")
     await bot.set_webhook(WEBHOOK_URL)
-    await dp.start_webhook(
-        bot=bot,
-        webhook_path="",
-        skip_updates=True,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 5000)),
-    )
+
+    app = web.Application()
+    app.router.add_post("/", dp.handler)
+    return app
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        web.run_app(main(), host="0.0.0.0", port=PORT)
+    except Exception as e:
+        logging.exception("Ошибка запуска приложения")
