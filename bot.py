@@ -1,197 +1,204 @@
 import os
-from aiogram import Bot, Dispatcher, types  # aiogram core classes
-from aiogram.filters import Command        # Filter to handle commands like /start
+from dotenv import load_dotenv
+load_dotenv()
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, FSInputFile
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
-from aiogram.types import FSInputFile
 
-# Define FSM States for the patient report data collection
-class PatientReport(StatesGroup):
-    fio = State()                # Full name of patient
-    sex = State()                # Gender
-    birth = State()              # Date of birth
-    address = State()            # Address
-    phone = State()              # Contact phone number
-    work_place = State()         # Place of work/study
-    disease_date = State()       # Date of disease onset
-    first_contact_date = State() # Date of first medical contact
-    diagnosis_date = State()     # Date when diagnosis was established
-    last_visit_date = State()    # Date of last visit
-    diag = State()               # Diagnosis
-    lab_results = State()        # Laboratory data
-    additional_info = State()    # Additional information
-    hospital_place = State()     # Place of hospitalization
-    reporter = State()           # Doctor's full name (report author)
-    sender = State()             # Sender (e.g., referring person or department)
-    registration_number = State()# Registration number
-    from_hospital = State()      # Institution (hospital/clinic name)
-
-# Initialize bot and dispatcher with memory storage for FSM
+# Загрузка токена бота из переменных окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable not set. Please set BOT_TOKEN before running the bot.")
-from aiogram.client.default import DefaultBotProperties
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    raise RuntimeError("Не указан токен бота. Установите переменную окружения BOT_TOKEN.")
+
+# Инициализация бота и диспетчера с указанием режима парсинга HTML (актуально для aiogram 3.x)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
-# Start command handler to initiate the data collection conversation
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message, state: FSMContext):
-    """
-    Handler for /start command. Begins the patient data collection by setting the first state.
-    """
-    await state.set_state(PatientReport.fio)  # set current state to expecting FIO
-    await message.answer("Здравствуйте! Давайте соберем данные пациента.\n\nВведите ФИО пациента:")
-    # The bot now waits for the user's next message, which should be the patient's name.
+# Определение состояний (FSM)
+class Form(StatesGroup):
+    fio = State()
+    sex = State()
+    birth = State()
+    address = State()
+    phone = State()
+    work = State()
+    disease_date = State()
+    consult_date = State()
+    diagnosis_date = State()
+    last_visit_date = State()
+    diagnosis = State()
+    lab_results = State()
+    additional_info = State()
+    doctor_name = State()
+    sender = State()
 
-# Handler for patient's full name (State: fio)
-@dp.message(PatientReport.fio)
-async def process_fio(message: types.Message, state: FSMContext):
-    # Save the patient's full name and move to next state
-    await state.update_data(fio=message.text)
-    await state.set_state(PatientReport.sex)
-    await message.answer("Укажите пол пациента (например, мужской/женский):")
+# Обработчик команды /start – запускает сценарий заполнения формы
+@dp.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    # Устанавливаем первое состояние и запрашиваем ФИО пациента
+    await state.set_state(Form.fio)
+    await message.answer(
+        "Привет! Я помогу заполнить экстренное извещение (форма №058-у).\n\n"
+        "Начнем. Введите ФИО пациента (полностью):",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
-# Handler for gender (State: sex)
-@dp.message(PatientReport.sex)
-async def process_sex(message: types.Message, state: FSMContext):
-    await state.update_data(sex=message.text)
-    await state.set_state(PatientReport.birth)
-    await message.answer("Введите дату рождения пациента (например, 01.01.2010):")
+# Обработчик состояния Form.fio (ФИО пациента)
+@dp.message(Form.fio)
+async def process_fio(message: Message, state: FSMContext):
+    fio = message.text.strip()
+    await state.update_data(fio=fio)
+    # Переходим к следующему вопросу – пол пациента
+    await state.set_state(Form.sex)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Мужской"), KeyboardButton(text="Женский")]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer("Пол пациента:", reply_markup=keyboard)
 
-# Handler for birth date (State: birth)
-@dp.message(PatientReport.birth)
-async def process_birth(message: types.Message, state: FSMContext):
-    await state.update_data(birth=message.text)
-    await state.set_state(PatientReport.address)
-    await message.answer("Введите адрес пациента:")
+# Обработчик состояния Form.sex (пол)
+@dp.message(Form.sex)
+async def process_sex(message: Message, state: FSMContext):
+    sex = message.text.strip()
+    await state.update_data(sex=sex)
+    await state.set_state(Form.birth)
+    await message.answer("Дата рождения пациента (ДД.MM.ГГГГ):", reply_markup=ReplyKeyboardRemove())
 
-# Handler for address (State: address)
-@dp.message(PatientReport.address)
-async def process_address(message: types.Message, state: FSMContext):
-    await state.update_data(address=message.text)
-    await state.set_state(PatientReport.phone)
-    await message.answer("Введите контактный телефон пациента:")
+# Обработчик состояния Form.birth (дата рождения)
+@dp.message(Form.birth)
+async def process_birth(message: Message, state: FSMContext):
+    birth = message.text.strip()
+    await state.update_data(birth=birth)
+    await state.set_state(Form.address)
+    await message.answer("Адрес пациента (место жительства):")
 
-# Handler for phone number (State: phone)
-@dp.message(PatientReport.phone)
-async def process_phone(message: types.Message, state: FSMContext):
-    await state.update_data(phone=message.text)
-    await state.set_state(PatientReport.work_place)
-    await message.answer("Укажите место работы или учебы пациента:")
+# Обработчик состояния Form.address (адрес)
+@dp.message(Form.address)
+async def process_address(message: Message, state: FSMContext):
+    address = message.text.strip()
+    await state.update_data(address=address)
+    await state.set_state(Form.phone)
+    await message.answer("Контактный телефон пациента:")
 
-# Handler for work/study place (State: work_place)
-@dp.message(PatientReport.work_place)
-async def process_work_place(message: types.Message, state: FSMContext):
-    await state.update_data(work_place=message.text)
-    await state.set_state(PatientReport.disease_date)
-    await message.answer("Введите дату начала заболевания:")
+# Обработчик состояния Form.phone (телефон)
+@dp.message(Form.phone)
+async def process_phone(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    await state.update_data(phone=phone)
+    await state.set_state(Form.work)
+    await message.answer("Место работы или учебы пациента:")
 
-# Handler for disease onset date (State: disease_date)
-@dp.message(PatientReport.disease_date)
-async def process_disease_date(message: types.Message, state: FSMContext):
-    await state.update_data(disease_date=message.text)
-    await state.set_state(PatientReport.first_contact_date)
-    await message.answer("Введите дату первичного обращения за помощью:")
+# Обработчик состояния Form.work (место работы)
+@dp.message(Form.work)
+async def process_work(message: Message, state: FSMContext):
+    work = message.text.strip()
+    await state.update_data(work=work)
+    await state.set_state(Form.disease_date)
+    await message.answer("Дата заболевания (первый день болезни):")
 
-# Handler for first contact date (State: first_contact_date)
-@dp.message(PatientReport.first_contact_date)
-async def process_first_contact_date(message: types.Message, state: FSMContext):
-    await state.update_data(first_contact_date=message.text)
-    await state.set_state(PatientReport.diagnosis_date)
-    await message.answer("Введите дату установления диагноза:")
+# Обработчик состояния Form.disease_date (дата заболевания)
+@dp.message(Form.disease_date)
+async def process_disease_date(message: Message, state: FSMContext):
+    disease_date = message.text.strip()
+    await state.update_data(disease_date=disease_date)
+    await state.set_state(Form.consult_date)
+    await message.answer("Дата обращения за медицинской помощью:")
 
-# Handler for diagnosis date (State: diagnosis_date)
-@dp.message(PatientReport.diagnosis_date)
-async def process_diagnosis_date(message: types.Message, state: FSMContext):
-    await state.update_data(diagnosis_date=message.text)
-    await state.set_state(PatientReport.last_visit_date)
-    await message.answer("Введите дату последнего визита пациента:")
+# Обработчик состояния Form.consult_date (дата обращения)
+@dp.message(Form.consult_date)
+async def process_consult_date(message: Message, state: FSMContext):
+    consult_date = message.text.strip()
+    await state.update_data(consult_date=consult_date)
+    await state.set_state(Form.diagnosis_date)
+    await message.answer("Дата установления диагноза:")
 
-# Handler for last visit date (State: last_visit_date)
-@dp.message(PatientReport.last_visit_date)
-async def process_last_visit_date(message: types.Message, state: FSMContext):
-    await state.update_data(last_visit_date=message.text)
-    await state.set_state(PatientReport.diag)
-    await message.answer("Введите диагноз пациента:")
+# Обработчик состояния Form.diagnosis_date (дата диагноза)
+@dp.message(Form.diagnosis_date)
+async def process_diagnosis_date(message: Message, state: FSMContext):
+    diagnosis_date = message.text.strip()
+    await state.update_data(diagnosis_date=diagnosis_date)
+    await state.set_state(Form.last_visit_date)
+    await message.answer("Дата последнего визита пациента:")
 
-# Handler for diagnosis text (State: diag)
-@dp.message(PatientReport.diag)
-async def process_diag(message: types.Message, state: FSMContext):
-    await state.update_data(diag=message.text)
-    await state.set_state(PatientReport.lab_results)
-    await message.answer("Введите лабораторные данные (если есть):")
+# Обработчик состояния Form.last_visit_date (дата последнего визита)
+@dp.message(Form.last_visit_date)
+async def process_last_visit_date(message: Message, state: FSMContext):
+    last_visit_date = message.text.strip()
+    await state.update_data(last_visit_date=last_visit_date)
+    await state.set_state(Form.diagnosis)
+    await message.answer("Диагноз (название заболевания):")
 
-# Handler for lab results (State: lab_results)
-@dp.message(PatientReport.lab_results)
-async def process_lab_results(message: types.Message, state: FSMContext):
-    await state.update_data(lab_results=message.text)
-    await state.set_state(PatientReport.additional_info)
-    await message.answer("Введите дополнительные сведения (если нужны):")
+# Обработчик состояния Form.diagnosis (диагноз)
+@dp.message(Form.diagnosis)
+async def process_diagnosis(message: Message, state: FSMContext):
+    diagnosis = message.text.strip()
+    await state.update_data(diagnosis=diagnosis)
+    await state.set_state(Form.lab_results)
+    await message.answer("Лабораторные результаты (если есть):")
 
-# Handler for additional info (State: additional_info)
-@dp.message(PatientReport.additional_info)
-async def process_additional_info(message: types.Message, state: FSMContext):
-    await state.update_data(additional_info=message.text)
-    await state.set_state(PatientReport.hospital_place)
-    await message.answer("Укажите место госпитализации (если было):")
+# Обработчик состояния Form.lab_results (лабораторные результаты)
+@dp.message(Form.lab_results)
+async def process_lab_results(message: Message, state: FSMContext):
+    lab_results = message.text.strip()
+    await state.update_data(lab_results=lab_results)
+    await state.set_state(Form.additional_info)
+    await message.answer("Дополнительные сведения (при необходимости):")
 
-# Handler for hospital place (State: hospital_place)
-@dp.message(PatientReport.hospital_place)
-async def process_hospital_place(message: types.Message, state: FSMContext):
-    await state.update_data(hospital_place=message.text)
-    await state.set_state(PatientReport.reporter)
-    await message.answer("Введите ФИО врача, заполняющего отчет:")
+# Обработчик состояния Form.additional_info (доп. сведения)
+@dp.message(Form.additional_info)
+async def process_additional_info(message: Message, state: FSMContext):
+    additional_info = message.text.strip()
+    await state.update_data(additional_info=additional_info)
+    await state.set_state(Form.doctor_name)
+    await message.answer("ФИО врача, заполнившего извещение:")
 
-# Handler for doctor's name (State: reporter)
-@dp.message(PatientReport.reporter)
-async def process_reporter(message: types.Message, state: FSMContext):
-    await state.update_data(reporter=message.text)
-    await state.set_state(PatientReport.sender)
-    await message.answer("Введите должность или ФИО отправителя пациента:")
+# Обработчик состояния Form.doctor_name (ФИО врача)
+@dp.message(Form.doctor_name)
+async def process_doctor_name(message: Message, state: FSMContext):
+    doctor_name = message.text.strip()
+    await state.update_data(doctor_name=doctor_name)
+    await state.set_state(Form.sender)
+    await message.answer("ФИО отправителя извещения (если отличается):")
 
-# Handler for sender (State: sender)
-@dp.message(PatientReport.sender)
-async def process_sender(message: types.Message, state: FSMContext):
-    await state.update_data(sender=message.text)
-    await state.set_state(PatientReport.registration_number)
-    await message.answer("Введите регистрационный номер (если имеется):")
-
-# Handler for registration number (State: registration_number)
-@dp.message(PatientReport.registration_number)
-async def process_registration_number(message: types.Message, state: FSMContext):
-    await state.update_data(registration_number=message.text)
-    await state.set_state(PatientReport.from_hospital)
-    await message.answer("Укажите учреждение (больницу/поликлинику):")
-
-# Handler for institution/from_hospital (State: from_hospital) - final step
-@dp.message(PatientReport.from_hospital)
-async def process_from_hospital(message: types.Message, state: FSMContext):
-    # Save the last piece of data
-    await state.update_data(from_hospital=message.text)
-    # Retrieve all collected data from FSM storage
-    data = await state.get_data()
-
-    # Generate the document using the template
+# Обработчик состояния Form.sender (отправитель извещения)
+@dp.message(Form.sender)
+async def process_sender(message: Message, state: FSMContext):
+    sender = message.text.strip()
+    data = await state.update_data(sender=sender)  # собираем все данные в словарь
+    await state.clear()  # сбрасываем состояние FSM
+    data["institution"] = "ДКЦ им. Л.М. Рошаля"    # добавляем фиксированное учреждение
     try:
-        doc = DocxTemplate("template.docx")           # Load the Word template
-        doc.render(data)                              # Substitute variables with actual data
-        output_path = "patient_report.docx"
-        doc.save(output_path)                         # Save the filled report as a new file
-
-        # Send the generated document to the user
-        file = FSInputFile(output_path)
-        await message.answer_document(file, caption="✅ Отчет сформирован. Вот ваш документ.")
+        # Формируем документ по шаблону
+        doc = DocxTemplate("template.docx")
+        doc.render(data)
+        output_file = f"notification_{message.from_user.id}.docx"
+        doc.save(output_file)
+        # Отправляем документ пользователю
+        file = FSInputFile(output_file, filename="izveshchenie_058u.docx")
+        await message.answer_document(file, caption="✅ Экстренное извещение сформировано.")
     except Exception as e:
-        # If there's an error during document creation, inform the user
-        await message.answer(f"Произошла ошибка при формировании документа: {e}")
+        logging.exception("Ошибка при формировании документа")
+        await message.answer("Извините, не удалось сформировать документ.")
 
-    # Finish FSM by clearing any stored state and data
+# Обработчик команды /cancel для отмены заполнения и сброса состояния
+@dp.message(Command("cancel"))
+async def cancel_process(message: Message, state: FSMContext):
     await state.clear()
+    await message.answer("Заполнение формы отменено. Начните сначала командой /start.", reply_markup=ReplyKeyboardRemove())
 
-# Start the bot by polling Telegram for new messages
+# Запуск бота (долгий опрос)
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    print("Bot is starting...")
-    dp.run_polling(bot)
+    asyncio.run(main())
