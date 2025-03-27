@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 
-# Настройка логирования в консоль и файл
+# Логирование в консоль + файл
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logfile_handler = logging.FileHandler("notifications_log.txt", encoding="utf-8")
 logfile_handler.setLevel(logging.INFO)
@@ -23,8 +23,12 @@ logfile_handler.setFormatter(formatter)
 logging.getLogger().addHandler(logfile_handler)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
 if not BOT_TOKEN:
     raise RuntimeError("Не указан токен бота. Установите переменную окружения BOT_TOKEN.")
+if not WEBHOOK_URL:
+    raise RuntimeError("Не указан WEBHOOK_URL в .env или переменных окружения.")
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
@@ -156,14 +160,9 @@ async def process_sender(message: Message, state: FSMContext):
         doc.render(data)
         output_file = f"notification_{message.from_user.id}.docx"
         doc.save(output_file)
-
         file = FSInputFile(output_file, filename="izveshchenie_058u.docx")
         await message.answer_document(file, caption="✅ Экстренное извещение сформировано.")
-
-        # Логирование в файл
-        log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - @{message.from_user.username or 'NoUsername'} - {data['fio']} - {data['diagnosis']}"
-        logging.info(log_entry)
-
+        logging.info(f"{datetime.now()} - @{message.from_user.username or 'NoUsername'} - {data['fio']} - {data['diagnosis']}")
     except Exception as e:
         logging.exception("Ошибка при формировании документа")
         await message.answer("Извините, не удалось сформировать документ.")
@@ -174,20 +173,14 @@ async def cancel_process(message: Message, state: FSMContext):
     await message.answer("Заполнение формы отменено. Начните сначала командой /start.", reply_markup=ReplyKeyboardRemove())
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
-    webhook_url = os.getenv("WEBHOOK_URL")
-    if not webhook_url:
-        raise RuntimeError("Не указан WEBHOOK_URL в .env")
-
-    await bot.set_webhook(webhook_url)
+    logging.info("Starting bot...")
+    await bot.set_webhook(WEBHOOK_URL)
     await dp.start_webhook(
         bot=bot,
         webhook_path="",
-        on_startup=None,
-        on_shutdown=None,
         skip_updates=True,
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 5000))
+        port=int(os.getenv("PORT", 5000)),
     )
 
 if __name__ == "__main__":
